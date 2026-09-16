@@ -20,6 +20,7 @@ const ALL_NOTE_FIELDS = [
   ...Array.from({ length: 5 }, (_, index) => CONTEXT_FIELDS(index + 1)).flat()
 ];
 const AUDIO_FIELDS = ["AudioWord", ...Array.from({ length: 5 }, (_, index) => `AudioSentence${index + 1}`)];
+const AUDIO_AUTOPLAY_FIELD = "AudioWordAuto";
 const AUDIO_MEDIA_REFERENCE_FIELD = "AudioMediaRefs";
 const assert = (condition, message) => {
   if (!condition) throw new Error(message);
@@ -189,7 +190,7 @@ const modelFields = await invoke("modelFieldNames", { modelName });
 const missingFields = ALL_NOTE_FIELDS.filter((field) => !modelFields.includes(field));
 assert(!missingFields.length, `Model is missing fields: ${missingFields.join("、")}`);
 if (tts.enabled) {
-  const missingAudioFields = [...AUDIO_FIELDS, AUDIO_MEDIA_REFERENCE_FIELD].filter((field) => !modelFields.includes(field));
+  const missingAudioFields = [...AUDIO_FIELDS, AUDIO_AUTOPLAY_FIELD, AUDIO_MEDIA_REFERENCE_FIELD].filter((field) => !modelFields.includes(field));
   assert(!missingAudioFields.length, `Model is missing TTS fields: ${missingAudioFields.join("、")}。请先运行 scripts/ensure-audio-fields.mjs 检查并在获得授权后用 --apply 修复。`);
 }
 
@@ -224,7 +225,7 @@ if (tts.enabled && tts.provider === "minimax") {
   const apiKey = await getMiniMaxApiKey(tts);
   let generatedCharacters = 0;
   for (const [noteIndex, note] of input.notes.entries()) {
-    for (const field of [...AUDIO_FIELDS, AUDIO_MEDIA_REFERENCE_FIELD]) ankiNotes[noteIndex].fields[field] = "";
+    for (const field of [...AUDIO_FIELDS, AUDIO_AUTOPLAY_FIELD, AUDIO_MEDIA_REFERENCE_FIELD]) ankiNotes[noteIndex].fields[field] = "";
     const audioTargets = [
       { field: "AudioWord", slot: "word", text: stripClozeMarkup(note.Word) },
       ...Array.from({ length: contextCounts[noteIndex] }, (_, index) => ({
@@ -261,6 +262,7 @@ if (tts.enabled && tts.provider === "minimax") {
     ankiNotes[noteIndex].fields[AUDIO_MEDIA_REFERENCE_FIELD] = audioTargets
       .map((target) => `[sound:${ankiNotes[noteIndex].fields[target.field]}]`)
       .join(" ");
+    ankiNotes[noteIndex].fields[AUDIO_AUTOPLAY_FIELD] = `[sound:${ankiNotes[noteIndex].fields.AudioWord}]`;
   }
   console.log(`MiniMax TTS 已生成或复用 ${contextCounts.reduce((sum, count) => sum + count + 1, 0)} 段音频；本次新生成 ${generatedCharacters} 个字符。`);
 }
@@ -269,7 +271,7 @@ const noteIds = await invoke("addNotes", { notes: ankiNotes });
 assert(noteIds.every(Boolean), "AnkiConnect returned an incomplete addNotes result; no automatic rollback was attempted.");
 const readback = await invoke("notesInfo", { notes: noteIds });
 for (const [index, note] of readback.entries()) {
-  for (const field of [...ALL_NOTE_FIELDS, ...(tts.enabled ? [...AUDIO_FIELDS, AUDIO_MEDIA_REFERENCE_FIELD] : [])]) {
+  for (const field of [...ALL_NOTE_FIELDS, ...(tts.enabled ? [...AUDIO_FIELDS, AUDIO_AUTOPLAY_FIELD, AUDIO_MEDIA_REFERENCE_FIELD] : [])]) {
     assert(note.fields[field]?.value === ankiNotes[index].fields[field], `Readback mismatch for ${ankiNotes[index].fields.Word}.${field}`);
   }
   assert(note.cards.length === 1, `Expected one cloze card for ${ankiNotes[index].fields.Word}, received ${note.cards.length}.`);
