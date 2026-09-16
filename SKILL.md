@@ -37,7 +37,7 @@ The JSON may optionally set `modelName`; otherwise the default is `AI多场景�
 
 Use MiniMax only when the user has explicitly chosen it and authorized TTS generation. Read [the MiniMax audio guide](references/minimax-tts.md) before running it. The API key may be supplied through an environment variable, the executing Mac's Keychain, or a local `.env`; never put it in note JSON, card templates, Git, or chat.
 
-The importer generates one word MP3 plus five sentence MP3s, stores them in the local Anki media collection, and writes their raw filenames into the six audio fields. It stores the corresponding sound tags in the non-rendered `AudioMediaRefs` field so Anki can retain and synchronize the files without autoplaying them. It uses deterministic names based on the source text, model, voice, and speed; already present media is reused without another MiniMax request.
+The importer generates one word MP3 plus five sentence MP3s, stores them in the local Anki media collection, and writes their raw filenames into the six audio fields. The standard template renders playback only on the answer side, so the question side does not leak the target word through audio. It stores the corresponding sound tags in the non-rendered `AudioMediaRefs` field so Anki can retain and synchronize the files without autoplaying them. It uses deterministic names based on the source text, model, voice, and speed; already present media is reused without another MiniMax request.
 
 To add TTS to existing notes in a deck, use `scripts/add-audio-to-existing.mjs`. It skips notes that already have `AudioWord`, so it does not overwrite existing audio.
 
