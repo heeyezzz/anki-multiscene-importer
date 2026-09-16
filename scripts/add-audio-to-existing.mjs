@@ -35,13 +35,28 @@ const invoke = async (action, params = {}) => {
   if (payload.error) throw new Error(`AnkiConnect ${action}: ${payload.error}`);
   return payload.result;
 };
+const getContextCount = (note) => {
+  let count = 0;
+  let foundGap = false;
+  for (let index = 1; index <= 5; index += 1) {
+    const sentence = note.fields[`Sentence${index}`]?.value?.trim();
+    if (!sentence) {
+      foundGap = true;
+      continue;
+    }
+    if (foundGap) throw new Error(`${note.fields.Word.value} has a non-consecutive Sentence${index}.`);
+    count = index;
+  }
+  if (count < 3) throw new Error(`${note.fields.Word.value} must contain three to five sentences before audio can be added.`);
+  return count;
+};
 
 const fields = await invoke("modelFieldNames", { modelName: MODEL_NAME });
 const missing = [...AUDIO_FIELDS, AUDIO_MEDIA_REFERENCE_FIELD].filter((field) => !fields.includes(field));
 if (missing.length) throw new Error(`Model is missing TTS fields: ${missing.join("、")}。请先安装支持音频字段的模板。`);
 const noteIds = await invoke("findNotes", { query: `deck:\"${config.deckName.replace(/[\\"]/g, "\\$&")}\" note:\"${MODEL_NAME}\"${config.word ? ` \"${config.word.replace(/[\\"]/g, "\\$&")}"` : ""}` });
 const notes = noteIds.length ? await invoke("notesInfo", { notes: noteIds }) : [];
-const pending = notes.filter((note) => !note.fields.AudioWord?.value.trim());
+const pending = notes.filter((note) => !note.fields.AudioWord?.value?.trim());
 if (config.word && notes.length !== 1) throw new Error(`Expected exactly one ${config.word} note in ${config.deckName}, found ${notes.length}.`);
 if (!pending.length) {
   console.log(`No notes in ${config.deckName} require TTS.`);
@@ -51,11 +66,12 @@ const apiKey = await getMiniMaxApiKey(config);
 let generatedCharacters = 0;
 for (const note of pending) {
   const word = note.fields.Word.value;
+  const contextCount = getContextCount(note);
   const targets = [
     { field: "AudioWord", slot: "word", text: word },
-    ...Array.from({ length: 5 }, (_, index) => ({ field: `AudioSentence${index + 1}`, slot: `sentence-${index + 1}`, text: stripClozeMarkup(note.fields[`Sentence${index + 1}`].value) }))
+    ...Array.from({ length: contextCount }, (_, index) => ({ field: `AudioSentence${index + 1}`, slot: `sentence-${index + 1}`, text: stripClozeMarkup(note.fields[`Sentence${index + 1}`].value) }))
   ];
-  const updates = {};
+  const updates = Object.fromEntries(AUDIO_FIELDS.map((field) => [field, ""]));
   for (const target of targets) {
     const filename = createMediaFilename({ word, slot: target.slot, text: target.text, model: config.model, voiceId: config.voiceId, speed: config.speed });
     if (!await invoke("retrieveMediaFile", { filename })) {
@@ -65,13 +81,17 @@ for (const note of pending) {
     }
     updates[target.field] = filename;
   }
-  updates[AUDIO_MEDIA_REFERENCE_FIELD] = Object.values(updates).map((filename) => `[sound:${filename}]`).join(" ");
+  updates[AUDIO_MEDIA_REFERENCE_FIELD] = targets.map((target) => `[sound:${updates[target.field]}]`).join(" ");
   await invoke("updateNoteFields", { note: { id: note.noteId, fields: updates } });
 }
 const verified = await invoke("notesInfo", { notes: pending.map((note) => note.noteId) });
 for (const note of verified) {
-  for (const field of [...AUDIO_FIELDS, AUDIO_MEDIA_REFERENCE_FIELD]) {
+  const contextCount = getContextCount(note);
+  for (const field of ["AudioWord", ...Array.from({ length: contextCount }, (_, index) => `AudioSentence${index + 1}`), AUDIO_MEDIA_REFERENCE_FIELD]) {
     if (!note.fields[field]?.value) throw new Error(`Readback mismatch for ${note.fields.Word.value}.${field}`);
+  }
+  for (let index = contextCount + 1; index <= 5; index += 1) {
+    if (note.fields[`AudioSentence${index}`]?.value) throw new Error(`Unexpected audio for empty ${note.fields.Word.value}.Sentence${index}.`);
   }
 }
 console.log(JSON.stringify({ deckName: config.deckName, modelName: MODEL_NAME, completed: verified.map((note) => ({ noteId: note.noteId, word: note.fields.Word.value })), newlyGeneratedCharacters: generatedCharacters }, null, 2));

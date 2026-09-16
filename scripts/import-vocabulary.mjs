@@ -11,16 +11,37 @@ import { getMiniMaxApiKey } from "./minimax-credentials.mjs";
 const DEFAULT_API_URL = "http://127.0.0.1:8765";
 const DEFAULT_MODEL_NAME = "AI多场景完型 1.0";
 const PART_OF_SPEECH_PATTERN = /^(?:n\.|v\.|adj\.|adv\.|prep\.|pron\.|conj\.|det\.|aux\.|phr\.)(?: \/ (?:n\.|v\.|adj\.|adv\.|prep\.|pron\.|conj\.|det\.|aux\.|phr\.))*$/;
-const REQUIRED_FIELDS = [
-  "Word", "PartOfSpeech", "IPA", "Chinese",
-  ...Array.from({ length: 5 }, (_, index) => index + 1).flatMap((index) => [
-    `Scene${index}`, `Sentence${index}`, `Translation${index}`, `Analysis${index}`
-  ])
+const BASE_REQUIRED_FIELDS = ["Word", "PartOfSpeech", "IPA", "Chinese"];
+const CONTEXT_FIELDS = (index) => [
+  `Scene${index}`, `Sentence${index}`, `Translation${index}`, `Analysis${index}`
+];
+const ALL_NOTE_FIELDS = [
+  ...BASE_REQUIRED_FIELDS,
+  ...Array.from({ length: 5 }, (_, index) => CONTEXT_FIELDS(index + 1)).flat()
 ];
 const AUDIO_FIELDS = ["AudioWord", ...Array.from({ length: 5 }, (_, index) => `AudioSentence${index + 1}`)];
 const AUDIO_MEDIA_REFERENCE_FIELD = "AudioMediaRefs";
 const assert = (condition, message) => {
   if (!condition) throw new Error(message);
+};
+const isFilledString = (value) => typeof value === "string" && value.trim();
+const getContextCount = (note, noteIndex) => {
+  let count = 0;
+  let foundGap = false;
+  for (let index = 1; index <= 5; index += 1) {
+    const fields = CONTEXT_FIELDS(index);
+    const populated = fields.map((field) => isFilledString(note[field]));
+    const hasAny = fields.some((field) => note[field] !== undefined && note[field] !== null && String(note[field]).trim());
+    if (!hasAny) {
+      foundGap = true;
+      continue;
+    }
+    assert(populated.every(Boolean), `notes[${noteIndex}] context ${index} must provide Scene, Sentence, Translation, and Analysis together.`);
+    assert(!foundGap, `notes[${noteIndex}] contexts must be consecutive; context ${index} cannot follow an empty context.`);
+    count = index;
+  }
+  assert(count >= 3, `notes[${noteIndex}] must provide three to five complete contexts.`);
+  return count;
 };
 
 const usage = "Usage: node import-vocabulary.mjs /absolute/path/to/notes.json [--dry-run] [--without-tts] [--anki-connect-url URL] [--tts minimax --minimax-voice VOICE_ID] [--minimax-model MODEL] [--minimax-speed NUMBER] [--minimax-min-interval-ms NUMBER] [--minimax-api-key-env NAME] [--minimax-keychain-service NAME] [--minimax-env-file PATH] [--minimax-endpoint URL]";
@@ -143,27 +164,29 @@ assert(typeof input.deckName === "string" && input.deckName.trim(), "deckName mu
 assert(Array.isArray(input.notes) && input.notes.length, "notes must be a non-empty array.");
 
 const noteWords = new Set();
-input.notes.forEach((note, noteIndex) => {
+const contextCounts = input.notes.map((note, noteIndex) => {
   assert(note && typeof note === "object" && !Array.isArray(note), `notes[${noteIndex}] must be an object.`);
-  for (const field of REQUIRED_FIELDS) {
+  for (const field of BASE_REQUIRED_FIELDS) {
     assert(typeof note[field] === "string" && note[field].trim(), `notes[${noteIndex}].${field} must be a non-empty string.`);
   }
+  const contextCount = getContextCount(note, noteIndex);
   const word = normalizeWord(note.Word);
   assert(!noteWords.has(word), `Duplicate Word in input: ${note.Word}`);
   noteWords.add(word);
   assert(PART_OF_SPEECH_PATTERN.test(note.PartOfSpeech.trim()), `notes[${noteIndex}].PartOfSpeech must use abbreviations such as n., v., adj., or n. / v.; do not use full English words.`);
-  for (let index = 1; index <= 5; index += 1) {
+  for (let index = 1; index <= contextCount; index += 1) {
     assert(/[\u3400-\u9fff]/.test(note[`Scene${index}`]), `notes[${noteIndex}].Scene${index} must be a short Chinese scene label, not an English-only label.`);
     const clozes = note[`Sentence${index}`].match(/\{\{c1::[^{}:]+::[^{}]+\}\}/g) || [];
     assert(clozes.length === 1, `notes[${noteIndex}].Sentence${index} must contain exactly one {{c1::target::hint}} cloze.`);
   }
+  return contextCount;
 });
 
 const [models, decks] = await Promise.all([invoke("modelNames"), invoke("deckNames")]);
 assert(models.includes(modelName), `Missing Anki model: ${modelName}`);
 assert(decks.includes(input.deckName), `Deck does not exist: ${input.deckName}`);
 const modelFields = await invoke("modelFieldNames", { modelName });
-const missingFields = REQUIRED_FIELDS.filter((field) => !modelFields.includes(field));
+const missingFields = ALL_NOTE_FIELDS.filter((field) => !modelFields.includes(field));
 assert(!missingFields.length, `Model is missing fields: ${missingFields.join("、")}`);
 if (tts.enabled) {
   const missingAudioFields = [...AUDIO_FIELDS, AUDIO_MEDIA_REFERENCE_FIELD].filter((field) => !modelFields.includes(field));
@@ -179,7 +202,7 @@ assert(!duplicates.length, `Words already exist in ${modelName}: ${duplicates.jo
 const ankiNotes = input.notes.map((fields) => ({
   deckName: input.deckName,
   modelName,
-  fields: Object.fromEntries(REQUIRED_FIELDS.map((field) => [field, fields[field].trim()])),
+  fields: Object.fromEntries(ALL_NOTE_FIELDS.map((field) => [field, typeof fields[field] === "string" ? fields[field].trim() : ""])),
   tags: ["多场景完型"]
 }));
 const canAdd = await invoke("canAddNotes", { notes: ankiNotes });
@@ -191,7 +214,7 @@ if (dryRun) {
     ankiConnectUrl: apiUrl,
     modelName,
     deckName: input.deckName,
-    words: input.notes.map((note) => note.Word),
+    words: input.notes.map((note, index) => ({ word: note.Word, contexts: contextCounts[index] })),
     tts: tts.enabled ? { provider: tts.provider, model: tts.model, voiceId: tts.voiceId, speed: tts.speed } : null
   }, null, 2));
   process.exit(0);
@@ -201,9 +224,10 @@ if (tts.enabled && tts.provider === "minimax") {
   const apiKey = await getMiniMaxApiKey(tts);
   let generatedCharacters = 0;
   for (const [noteIndex, note] of input.notes.entries()) {
+    for (const field of [...AUDIO_FIELDS, AUDIO_MEDIA_REFERENCE_FIELD]) ankiNotes[noteIndex].fields[field] = "";
     const audioTargets = [
       { field: "AudioWord", slot: "word", text: stripClozeMarkup(note.Word) },
-      ...Array.from({ length: 5 }, (_, index) => ({
+      ...Array.from({ length: contextCounts[noteIndex] }, (_, index) => ({
         field: `AudioSentence${index + 1}`,
         slot: `sentence-${index + 1}`,
         text: stripClozeMarkup(note[`Sentence${index + 1}`])
@@ -238,14 +262,14 @@ if (tts.enabled && tts.provider === "minimax") {
       .map((target) => `[sound:${ankiNotes[noteIndex].fields[target.field]}]`)
       .join(" ");
   }
-  console.log(`MiniMax TTS 已生成或复用 ${input.notes.length * 6} 段音频；本次新生成 ${generatedCharacters} 个字符。`);
+  console.log(`MiniMax TTS 已生成或复用 ${contextCounts.reduce((sum, count) => sum + count + 1, 0)} 段音频；本次新生成 ${generatedCharacters} 个字符。`);
 }
 
 const noteIds = await invoke("addNotes", { notes: ankiNotes });
 assert(noteIds.every(Boolean), "AnkiConnect returned an incomplete addNotes result; no automatic rollback was attempted.");
 const readback = await invoke("notesInfo", { notes: noteIds });
 for (const [index, note] of readback.entries()) {
-  for (const field of [...REQUIRED_FIELDS, ...(tts.enabled ? [...AUDIO_FIELDS, AUDIO_MEDIA_REFERENCE_FIELD] : [])]) {
+  for (const field of [...ALL_NOTE_FIELDS, ...(tts.enabled ? [...AUDIO_FIELDS, AUDIO_MEDIA_REFERENCE_FIELD] : [])]) {
     assert(note.fields[field]?.value === ankiNotes[index].fields[field], `Readback mismatch for ${ankiNotes[index].fields.Word}.${field}`);
   }
   assert(note.cards.length === 1, `Expected one cloze card for ${ankiNotes[index].fields.Word}, received ${note.cards.length}.`);
