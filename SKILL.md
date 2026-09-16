@@ -33,6 +33,14 @@ node "$SKILL_DIR/scripts/import-vocabulary.mjs" /absolute/path/to/notes.json --d
 
 The JSON may optionally set `modelName`; otherwise the default is `AI多场景完型 1.0`. The script requires the requested existing model and deck; it never creates or changes either. It validates all required fields, requires a Chinese scene label for each `Scene1–5`, requires standard abbreviated parts of speech, detects existing `Word` values, calls `canAddNotes`, adds notes, and reads each note back.
 
+## Optional MiniMax audio
+
+Use MiniMax only when the user has explicitly chosen it and authorized TTS generation. Read [the MiniMax audio guide](references/minimax-tts.md) before running it. The API key may be supplied through an environment variable, the executing Mac's Keychain, or a local `.env`; never put it in note JSON, card templates, Git, or chat.
+
+The importer generates one word MP3 plus five sentence MP3s, stores them in the local Anki media collection, and writes their raw filenames into the six audio fields. It stores the corresponding sound tags in the non-rendered `AudioMediaRefs` field so Anki can retain and synchronize the files without autoplaying them. It uses deterministic names based on the source text, model, voice, and speed; already present media is reused without another MiniMax request.
+
+To add TTS to existing notes in a deck, use `scripts/add-audio-to-existing.mjs`. It skips notes that already have `AudioWord`, so it does not overwrite existing audio.
+
 If AnkiConnect is unavailable, stop and ask the user to open Anki with AnkiConnect enabled on that computer. Never add a fallback that writes collection files directly. Do not expose an AnkiConnect endpoint publicly merely to make remote agents work; use the Anki instance the executing agent is authorized to access.
 
 ## After writing

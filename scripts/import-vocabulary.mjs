@@ -1,5 +1,12 @@
 #!/usr/bin/env node
 import { readFile } from "node:fs/promises";
+import {
+  MINIMAX_TTS_ENDPOINT,
+  createMediaFilename,
+  stripClozeMarkup,
+  synthesizeMiniMax
+} from "./minimax-tts.mjs";
+import { getMiniMaxApiKey } from "./minimax-credentials.mjs";
 
 const DEFAULT_API_URL = "http://127.0.0.1:8765";
 const DEFAULT_MODEL_NAME = "AI多场景完型 1.0";
@@ -10,11 +17,27 @@ const REQUIRED_FIELDS = [
     `Scene${index}`, `Sentence${index}`, `Translation${index}`, `Analysis${index}`
   ])
 ];
+const AUDIO_FIELDS = ["AudioWord", ...Array.from({ length: 5 }, (_, index) => `AudioSentence${index + 1}`)];
+const AUDIO_MEDIA_REFERENCE_FIELD = "AudioMediaRefs";
+const assert = (condition, message) => {
+  if (!condition) throw new Error(message);
+};
 
-const usage = "Usage: node import-vocabulary.mjs /absolute/path/to/notes.json [--dry-run] [--anki-connect-url URL]";
+const usage = "Usage: node import-vocabulary.mjs /absolute/path/to/notes.json [--dry-run] [--anki-connect-url URL] [--tts minimax --minimax-voice VOICE_ID] [--minimax-model MODEL] [--minimax-speed NUMBER] [--minimax-min-interval-ms NUMBER] [--minimax-api-key-env NAME] [--minimax-keychain-service NAME] [--minimax-env-file PATH] [--minimax-endpoint URL]";
 const [inputPath, ...options] = process.argv.slice(2);
 let dryRun = false;
 let configuredApiUrl = process.env.ANKI_CONNECT_URL || DEFAULT_API_URL;
+const tts = {
+  provider: "",
+  voiceId: "",
+  model: "speech-2.8-hd",
+  speed: 1,
+  minIntervalMs: 11000,
+  apiKeyEnv: "MINIMAX_API_KEY",
+  keychainService: "anki-minimax-tts",
+  envFile: "",
+  endpoint: MINIMAX_TTS_ENDPOINT
+};
 
 if (!inputPath || inputPath.startsWith("--")) throw new Error(usage);
 for (let index = 0; index < options.length; index += 1) {
@@ -26,9 +49,58 @@ for (let index = 0; index < options.length; index += 1) {
     if (!value || value.startsWith("--")) throw new Error(`${usage}\n--anki-connect-url requires a URL.`);
     configuredApiUrl = value;
     index += 1;
+  } else if (option === "--tts") {
+    const value = options[index + 1];
+    if (value !== "minimax") throw new Error(`${usage}\n--tts currently supports only minimax.`);
+    tts.provider = value;
+    index += 1;
+  } else if (option === "--minimax-voice") {
+    const value = options[index + 1];
+    if (!value || value.startsWith("--")) throw new Error(`${usage}\n--minimax-voice requires a voice ID.`);
+    tts.voiceId = value;
+    index += 1;
+  } else if (option === "--minimax-model") {
+    const value = options[index + 1];
+    if (!value || value.startsWith("--")) throw new Error(`${usage}\n--minimax-model requires a model name.`);
+    tts.model = value;
+    index += 1;
+  } else if (option === "--minimax-speed") {
+    const value = Number(options[index + 1]);
+    if (!Number.isFinite(value) || value <= 0) throw new Error(`${usage}\n--minimax-speed requires a positive number.`);
+    tts.speed = value;
+    index += 1;
+  } else if (option === "--minimax-min-interval-ms") {
+    const value = Number(options[index + 1]);
+    if (!Number.isFinite(value) || value < 0) throw new Error(`${usage}\n--minimax-min-interval-ms requires a non-negative number.`);
+    tts.minIntervalMs = value;
+    index += 1;
+  } else if (option === "--minimax-api-key-env") {
+    const value = options[index + 1];
+    if (!value || value.startsWith("--")) throw new Error(`${usage}\n--minimax-api-key-env requires an environment-variable name.`);
+    tts.apiKeyEnv = value;
+    index += 1;
+  } else if (option === "--minimax-keychain-service") {
+    const value = options[index + 1];
+    if (!value || value.startsWith("--")) throw new Error(`${usage}\n--minimax-keychain-service requires a service name.`);
+    tts.keychainService = value;
+    index += 1;
+  } else if (option === "--minimax-env-file") {
+    const value = options[index + 1];
+    if (!value || value.startsWith("--")) throw new Error(`${usage}\n--minimax-env-file requires a file path.`);
+    tts.envFile = value;
+    index += 1;
+  } else if (option === "--minimax-endpoint") {
+    const value = options[index + 1];
+    if (!value || value.startsWith("--")) throw new Error(`${usage}\n--minimax-endpoint requires a URL.`);
+    tts.endpoint = value;
+    index += 1;
   } else {
     throw new Error(usage);
   }
+}
+
+if (tts.provider) {
+  assert(tts.voiceId, "MiniMax TTS requires --minimax-voice VOICE_ID.");
 }
 
 let apiUrl;
@@ -51,9 +123,6 @@ const invoke = async (action, params = {}) => {
 };
 
 const normalizeWord = (value) => value.normalize("NFKC").trim().toLocaleLowerCase("en-US");
-const assert = (condition, message) => {
-  if (!condition) throw new Error(message);
-};
 
 const raw = await readFile(inputPath, "utf8");
 let input;
@@ -92,6 +161,10 @@ assert(decks.includes(input.deckName), `Deck does not exist: ${input.deckName}`)
 const modelFields = await invoke("modelFieldNames", { modelName });
 const missingFields = REQUIRED_FIELDS.filter((field) => !modelFields.includes(field));
 assert(!missingFields.length, `Model is missing fields: ${missingFields.join("、")}`);
+if (tts.provider) {
+  const missingAudioFields = [...AUDIO_FIELDS, AUDIO_MEDIA_REFERENCE_FIELD].filter((field) => !modelFields.includes(field));
+  assert(!missingAudioFields.length, `Model is missing TTS fields: ${missingAudioFields.join("、")}。请先安装支持音频字段的模板。`);
+}
 
 const existingIds = await invoke("findNotes", { query: `note:\"${modelName.replace(/[\\"]/g, "\\$&")}\"` });
 const existingNotes = existingIds.length ? await invoke("notesInfo", { notes: existingIds }) : [];
@@ -109,15 +182,66 @@ const canAdd = await invoke("canAddNotes", { notes: ankiNotes });
 assert(canAdd.every(Boolean), "AnkiConnect rejected one or more notes during canAddNotes.");
 
 if (dryRun) {
-  console.log(JSON.stringify({ dryRun: true, ankiConnectUrl: apiUrl, modelName, deckName: input.deckName, words: input.notes.map((note) => note.Word) }, null, 2));
+  console.log(JSON.stringify({
+    dryRun: true,
+    ankiConnectUrl: apiUrl,
+    modelName,
+    deckName: input.deckName,
+    words: input.notes.map((note) => note.Word),
+    tts: tts.provider ? { provider: tts.provider, model: tts.model, voiceId: tts.voiceId, speed: tts.speed } : null
+  }, null, 2));
   process.exit(0);
+}
+
+if (tts.provider === "minimax") {
+  const apiKey = await getMiniMaxApiKey(tts);
+  let generatedCharacters = 0;
+  for (const [noteIndex, note] of input.notes.entries()) {
+    const audioTargets = [
+      { field: "AudioWord", slot: "word", text: stripClozeMarkup(note.Word) },
+      ...Array.from({ length: 5 }, (_, index) => ({
+        field: `AudioSentence${index + 1}`,
+        slot: `sentence-${index + 1}`,
+        text: stripClozeMarkup(note[`Sentence${index + 1}`])
+      }))
+    ];
+    for (const target of audioTargets) {
+      const filename = createMediaFilename({
+        word: note.Word,
+        slot: target.slot,
+        text: target.text,
+        model: tts.model,
+        voiceId: tts.voiceId,
+        speed: tts.speed
+      });
+      const cached = await invoke("retrieveMediaFile", { filename });
+      if (!cached) {
+        const generated = await synthesizeMiniMax({
+          apiKey,
+          endpoint: tts.endpoint,
+          text: target.text,
+          model: tts.model,
+          voiceId: tts.voiceId,
+          speed: tts.speed,
+          minIntervalMs: tts.minIntervalMs
+        });
+        await invoke("storeMediaFile", { filename, data: generated.audioBase64 });
+        generatedCharacters += generated.usageCharacters;
+      }
+      ankiNotes[noteIndex].fields[target.field] = filename;
+    }
+    ankiNotes[noteIndex].fields[AUDIO_MEDIA_REFERENCE_FIELD] = audioTargets
+      .map((target) => `[sound:${ankiNotes[noteIndex].fields[target.field]}]`)
+      .join(" ");
+  }
+  console.log(`MiniMax TTS 已生成或复用 ${input.notes.length * 6} 段音频；本次新生成 ${generatedCharacters} 个字符。`);
 }
 
 const noteIds = await invoke("addNotes", { notes: ankiNotes });
 assert(noteIds.every(Boolean), "AnkiConnect returned an incomplete addNotes result; no automatic rollback was attempted.");
 const readback = await invoke("notesInfo", { notes: noteIds });
 for (const [index, note] of readback.entries()) {
-  for (const field of REQUIRED_FIELDS) {
+  for (const field of [...REQUIRED_FIELDS, ...(tts.provider ? [...AUDIO_FIELDS, AUDIO_MEDIA_REFERENCE_FIELD] : [])]) {
     assert(note.fields[field]?.value === ankiNotes[index].fields[field], `Readback mismatch for ${ankiNotes[index].fields.Word}.${field}`);
   }
   assert(note.cards.length === 1, `Expected one cloze card for ${ankiNotes[index].fields.Word}, received ${note.cards.length}.`);

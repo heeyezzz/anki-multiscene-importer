@@ -23,6 +23,12 @@ Scene4, Sentence4, Translation4, Analysis4,
 Scene5, Sentence5, Translation5, Analysis5
 ```
 
+When the model has audio enabled, it also contains these optional fields. Do not put values in them in the input JSON; the importer fills them only when MiniMax TTS is explicitly enabled:
+
+```text
+AudioWord, AudioSentence1, AudioSentence2, AudioSentence3, AudioSentence4, AudioSentence5, AudioMediaRefs
+```
+
 ## Content conventions
 
 - `PartOfSpeech` must use abbreviations: `n.`, `v.`, `adj.`, `adv.`, `prep.`, `pron.`, `conj.`, `det.`, `aux.`, or `phr.`. Multiple roles use ` / `, for example `n. / v.`. Do not use full English words such as `noun` or `verb`.

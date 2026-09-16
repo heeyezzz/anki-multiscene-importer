@@ -1,0 +1,40 @@
+# MiniMax TTS
+
+Use only for an authorized import that needs stored Anki audio. This is an import-time operation, never a request from card-template JavaScript.
+
+## Configuration
+
+The scripts first check `MINIMAX_API_KEY`, then the macOS Keychain item named `anki-minimax-tts`, then `.env` in the Skill root. To use a different dotenv file, pass `--minimax-env-file /absolute/path/to/.env`. To store the key in the Keychain:
+
+```sh
+read -s "MINIMAX_KEY?MiniMax API key: "
+security add-generic-password -U -a "$USER" -s "anki-minimax-tts" -w "$MINIMAX_KEY"
+unset MINIMAX_KEY
+```
+
+Copy `.env.example` to `.env`, fill in `MINIMAX_API_KEY`, and keep `.env` out of Git. An environment variable remains useful for automation, but do not commit either form of the key or add it to JSON note data. The China endpoint is `https://api.minimax.cn/v1/t2a_v2` and uses Bearer authorization.
+
+## Import command
+
+```sh
+node "$SKILL_DIR/scripts/import-vocabulary.mjs" /absolute/path/to/notes.json --dry-run \
+  --tts minimax --minimax-voice "English_Steady_Female_1"
+
+node "$SKILL_DIR/scripts/import-vocabulary.mjs" /absolute/path/to/notes.json \
+  --tts minimax --minimax-voice "English_Steady_Female_1" \
+  --minimax-model "speech-2.8-hd" --minimax-speed 1
+```
+
+To add audio to notes already in a deck:
+
+```sh
+node "$SKILL_DIR/scripts/add-audio-to-existing.mjs" \
+  --deck "测试::AI多场景完型测试" \
+  --minimax-voice "English_Steady_Female_1"
+```
+
+`--tts minimax` requires `--minimax-voice`. The default model is `speech-2.8-hd`, the default speed is `1`, and a conservative 11-second interval is kept between fresh synthesis requests to avoid RPM errors. Override it only when your MiniMax quota supports a higher request rate with `--minimax-min-interval-ms NUMBER`. The default key environment variable is `MINIMAX_API_KEY`, and the default Keychain service is `anki-minimax-tts`. To use another environment-variable name or Keychain service, pass `--minimax-api-key-env NAME` or `--minimax-keychain-service NAME`.
+
+The importer creates six audio files per new note: one for `Word` and one for each unclozed `Sentence1` through `Sentence5`. It checks Anki media for the deterministic filename before each synthesis. A stopped import can be run again: cached files are reused, and only missing audio is charged again. The six audio fields hold raw filenames for click-only playback; `AudioMediaRefs` holds the matching `[sound:...]` tags but is intentionally not rendered by card templates, preventing automatic playback while preserving Anki media sync and checks.
+
+The importer uses synchronous T2A because each target is short. MiniMax returns hex-encoded MP3 data; the script decodes it locally and uploads it through AnkiConnect `storeMediaFile`.
