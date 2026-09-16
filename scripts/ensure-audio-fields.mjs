@@ -2,7 +2,7 @@
 
 const API_URL = process.env.ANKI_CONNECT_URL || "http://127.0.0.1:8765";
 const MODEL_NAME = "AI多场景完型 1.0";
-const AUDIO_FIELDS = ["AudioWord", "AudioSentence1", "AudioSentence2", "AudioSentence3", "AudioSentence4", "AudioSentence5", "AudioWordAuto", "AudioMediaRefs"];
+const AUDIO_FIELDS = ["AudioWord", "AudioSentence1", "AudioSentence2", "AudioSentence3", "AudioSentence4", "AudioSentence5", "AudioMediaRefs"];
 const apply = process.argv.slice(2).includes("--apply");
 
 const invoke = async (action, params = {}) => {

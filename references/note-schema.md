@@ -26,10 +26,10 @@ Scene3, Sentence3, Translation3, Analysis3
 When the model has audio enabled, it also contains these optional fields. Do not put values in them in the input JSON; the importer fills them only when MiniMax TTS is explicitly enabled:
 
 ```text
-AudioWord, AudioSentence1, AudioSentence2, AudioSentence3, AudioSentence4, AudioSentence5, AudioWordAuto, AudioMediaRefs
+AudioWord, AudioSentence1, AudioSentence2, AudioSentence3, AudioSentence4, AudioSentence5, AudioMediaRefs
 ```
 
-`AudioWord` stores the raw MP3 filename for the custom replay button. `AudioWordAuto` stores the complete `[sound:filename.mp3]` reference used only by the answer template for Anki's native automatic playback. Do not supply either field in input JSON.
+`AudioWord` stores the raw MP3 filename for the custom replay button. Do not supply audio fields in input JSON.
 
 ## Content conventions
 
