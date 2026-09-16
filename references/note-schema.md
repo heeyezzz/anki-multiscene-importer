@@ -41,3 +41,5 @@ Each `Sentence1` through `Sentence5` must contain exactly one target cloze in th
 ```
 
 The target form can differ from `Word` when the sentence needs an inflection, such as `delay` → `delayed`. Do not put HTML, sound tags, or JavaScript in import data. The importer stores supplied text as fields and does not alter card templates.
+
+For how to design the five examples as useful variable-retrieval prompts, read [example-design.md](example-design.md).

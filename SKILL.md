@@ -11,7 +11,7 @@ Import new, complete vocabulary notes into the Anki collection available through
 
 1. Read [the note schema](references/note-schema.md).
 2. Confirm the user has authorized adding the requested notes. Do not infer authorization from a request to merely draft, review, or validate vocabulary.
-3. Prepare a JSON file following the schema. Keep examples short, natural, and varied; each sentence must include one `{{c1::...::填入对应词汇}}` cloze. The clozed form may be an inflection or a phrase. Use short Chinese labels for every `Scene` field and standard abbreviations such as `n.` / `v.` / `adj.` in `PartOfSpeech`.
+3. Read [the example-design guide](references/example-design.md), then prepare a JSON file following the schema. Treat the five examples as five distinct retrieval conditions, not cosmetic rewrites of one sentence. Each sentence must include one `{{c1::...::填入对应词汇}}` cloze. The clozed form may be an inflection or a phrase. Use short Chinese labels for every `Scene` field and standard abbreviations such as `n.` / `v.` / `adj.` in `PartOfSpeech`.
 4. Run `node "$SKILL_DIR/scripts/ensure-audio-fields.mjs"` first. If it reports missing fields, stop and obtain authorization before running the shown `--apply` repair command.
 5. Run the importer with `--dry-run` first whenever the data was produced or transformed in the current task. Resolve every reported validation or duplicate error before a real import.
 
