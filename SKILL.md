@@ -12,7 +12,8 @@ Import new, complete vocabulary notes into the Anki collection available through
 1. Read [the note schema](references/note-schema.md).
 2. Confirm the user has authorized adding the requested notes. Do not infer authorization from a request to merely draft, review, or validate vocabulary.
 3. Prepare a JSON file following the schema. Keep examples short, natural, and varied; each sentence must include one `{{c1::...::填入对应词汇}}` cloze. The clozed form may be an inflection or a phrase. Use short Chinese labels for every `Scene` field and standard abbreviations such as `n.` / `v.` / `adj.` in `PartOfSpeech`.
-4. Run the importer with `--dry-run` first whenever the data was produced or transformed in the current task. Resolve every reported validation or duplicate error before a real import.
+4. Run `node "$SKILL_DIR/scripts/ensure-audio-fields.mjs"` first. If it reports missing fields, stop and obtain authorization before running the shown `--apply` repair command.
+5. Run the importer with `--dry-run` first whenever the data was produced or transformed in the current task. Resolve every reported validation or duplicate error before a real import.
 
 ## Import
 
@@ -33,13 +34,15 @@ node "$SKILL_DIR/scripts/import-vocabulary.mjs" /absolute/path/to/notes.json --d
 
 The JSON may optionally set `modelName`; otherwise the default is `AI多场景完型 1.0`. The script requires the requested existing model and deck; it never creates or changes either. It validates all required fields, requires a Chinese scene label for each `Scene1–5`, requires standard abbreviated parts of speech, detects existing `Word` values, calls `canAddNotes`, adds notes, and reads each note back.
 
-## Optional MiniMax audio
+## Required MiniMax audio
 
-Use MiniMax only when the user has explicitly chosen it and authorized TTS generation. Read [the MiniMax audio guide](references/minimax-tts.md) before running it. The API key may be supplied through an environment variable, the executing Mac's Keychain, or a local `.env`; never put it in note JSON, card templates, Git, or chat.
+This configured workflow generates MiniMax audio by default: `speech-2.8-hd`, `English_Steady_Female_1`, speed `1`. Before a real import, state that it will make six paid TTS requests per uncached note and confirm that the user has authorized the import with audio. Read [the MiniMax audio guide](references/minimax-tts.md) before running it. The API key may be supplied through an environment variable, the executing Mac's Keychain, or a local `.env`; never put it in note JSON, card templates, Git, or chat.
 
 The importer generates one word MP3 plus five sentence MP3s, stores them in the local Anki media collection, and writes their raw filenames into the six audio fields. The standard template renders playback only on the answer side, so the question side does not leak the target word through audio. It stores the corresponding sound tags in the non-rendered `AudioMediaRefs` field so Anki can retain and synchronize the files without autoplaying them. It uses deterministic names based on the source text, model, voice, and speed; already present media is reused without another MiniMax request.
 
-To add TTS to existing notes in a deck, use `scripts/add-audio-to-existing.mjs`. It skips notes that already have `AudioWord`, so it does not overwrite existing audio.
+To add TTS to existing notes in a deck, use `scripts/add-audio-to-existing.mjs`. It skips notes that already have `AudioWord`, so it does not overwrite existing audio. Pass `--word WORD` to repair one specific note instead of the whole deck.
+
+Use `--without-tts` only when the user explicitly asks to create a card without audio. Without that explicit option, a missing TTS field or API key is an import-blocking error rather than permission to create a silent card.
 
 If AnkiConnect is unavailable, stop and ask the user to open Anki with AnkiConnect enabled on that computer. Never add a fallback that writes collection files directly. Do not expose an AnkiConnect endpoint publicly merely to make remote agents work; use the Anki instance the executing agent is authorized to access.
 

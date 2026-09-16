@@ -6,14 +6,15 @@ const API_URL = process.env.ANKI_CONNECT_URL || "http://127.0.0.1:8765";
 const MODEL_NAME = "AI多场景完型 1.0";
 const AUDIO_FIELDS = ["AudioWord", ...Array.from({ length: 5 }, (_, index) => `AudioSentence${index + 1}`)];
 const AUDIO_MEDIA_REFERENCE_FIELD = "AudioMediaRefs";
-const usage = "Usage: node add-audio-to-existing.mjs --deck DECK_NAME --minimax-voice VOICE_ID [--minimax-model MODEL] [--minimax-speed NUMBER] [--minimax-min-interval-ms NUMBER] [--minimax-api-key-env NAME] [--minimax-keychain-service NAME] [--minimax-env-file PATH] [--minimax-endpoint URL]";
+const usage = "Usage: node add-audio-to-existing.mjs --deck DECK_NAME --minimax-voice VOICE_ID [--word WORD] [--minimax-model MODEL] [--minimax-speed NUMBER] [--minimax-min-interval-ms NUMBER] [--minimax-api-key-env NAME] [--minimax-keychain-service NAME] [--minimax-env-file PATH] [--minimax-endpoint URL]";
 const options = process.argv.slice(2);
-const config = { deckName: "", voiceId: "", model: "speech-2.8-hd", speed: 1, minIntervalMs: 11000, apiKeyEnv: "MINIMAX_API_KEY", keychainService: "anki-minimax-tts", envFile: "", endpoint: MINIMAX_TTS_ENDPOINT };
+const config = { deckName: "", word: "", voiceId: "", model: "speech-2.8-hd", speed: 1, minIntervalMs: 11000, apiKeyEnv: "MINIMAX_API_KEY", keychainService: "anki-minimax-tts", envFile: "", endpoint: MINIMAX_TTS_ENDPOINT };
 for (let index = 0; index < options.length; index += 1) {
   const option = options[index];
   const value = options[index + 1];
   if (!value || value.startsWith("--")) throw new Error(usage);
   if (option === "--deck") config.deckName = value;
+  else if (option === "--word") config.word = value;
   else if (option === "--minimax-voice") config.voiceId = value;
   else if (option === "--minimax-model") config.model = value;
   else if (option === "--minimax-speed") config.speed = Number(value);
@@ -38,9 +39,10 @@ const invoke = async (action, params = {}) => {
 const fields = await invoke("modelFieldNames", { modelName: MODEL_NAME });
 const missing = [...AUDIO_FIELDS, AUDIO_MEDIA_REFERENCE_FIELD].filter((field) => !fields.includes(field));
 if (missing.length) throw new Error(`Model is missing TTS fields: ${missing.join("、")}。请先安装支持音频字段的模板。`);
-const noteIds = await invoke("findNotes", { query: `deck:\"${config.deckName.replace(/[\\"]/g, "\\$&")}\" note:\"${MODEL_NAME}\"` });
+const noteIds = await invoke("findNotes", { query: `deck:\"${config.deckName.replace(/[\\"]/g, "\\$&")}\" note:\"${MODEL_NAME}\"${config.word ? ` \"${config.word.replace(/[\\"]/g, "\\$&")}"` : ""}` });
 const notes = noteIds.length ? await invoke("notesInfo", { notes: noteIds }) : [];
 const pending = notes.filter((note) => !note.fields.AudioWord?.value.trim());
+if (config.word && notes.length !== 1) throw new Error(`Expected exactly one ${config.word} note in ${config.deckName}, found ${notes.length}.`);
 if (!pending.length) {
   console.log(`No notes in ${config.deckName} require TTS.`);
   process.exit(0);
