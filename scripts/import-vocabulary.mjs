@@ -12,19 +12,27 @@ const DEFAULT_API_URL = "http://127.0.0.1:8765";
 const DEFAULT_MODEL_NAME = "AI多场景完型 1.0";
 const PART_OF_SPEECH_PATTERN = /^(?:n\.|v\.|adj\.|adv\.|prep\.|pron\.|conj\.|det\.|aux\.|phr\.)(?: \/ (?:n\.|v\.|adj\.|adv\.|prep\.|pron\.|conj\.|det\.|aux\.|phr\.))*$/;
 const BASE_REQUIRED_FIELDS = ["Word", "PartOfSpeech", "IPA", "Chinese"];
+const THEME_FIELD = "Theme";
+const ALLOWED_THEMES = new Set(["minimal", "bauhaus"]);
 const CONTEXT_FIELDS = (index) => [
   `Scene${index}`, `Sentence${index}`, `Translation${index}`, `Analysis${index}`
 ];
 const ALL_NOTE_FIELDS = [
   ...BASE_REQUIRED_FIELDS,
+  THEME_FIELD,
   ...Array.from({ length: 5 }, (_, index) => CONTEXT_FIELDS(index + 1)).flat()
 ];
 const AUDIO_FIELDS = ["AudioWord", ...Array.from({ length: 5 }, (_, index) => `AudioSentence${index + 1}`)];
+const AUDIO_AUTOPLAY_FIELD = "AudioWordAuto";
 const AUDIO_MEDIA_REFERENCE_FIELD = "AudioMediaRefs";
 const assert = (condition, message) => {
   if (!condition) throw new Error(message);
 };
 const isFilledString = (value) => typeof value === "string" && value.trim();
+const normalizeTheme = (value) => {
+  if (value === undefined || value === null || String(value).trim() === "") return "bauhaus";
+  return String(value).trim().toLocaleLowerCase("en-US");
+};
 const getContextCount = (note, noteIndex) => {
   let count = 0;
   let foundGap = false;
@@ -44,9 +52,10 @@ const getContextCount = (note, noteIndex) => {
   return count;
 };
 
-const usage = "Usage: node import-vocabulary.mjs /absolute/path/to/notes.json [--dry-run] [--without-tts] [--anki-connect-url URL] [--tts minimax --minimax-voice VOICE_ID] [--minimax-model MODEL] [--minimax-speed NUMBER] [--minimax-min-interval-ms NUMBER] [--minimax-api-key-env NAME] [--minimax-keychain-service NAME] [--minimax-env-file PATH] [--minimax-endpoint URL]";
+const usage = "Usage: node import-vocabulary.mjs /absolute/path/to/notes.json [--dry-run] [--confirmed] [--without-tts] [--anki-connect-url URL] [--tts minimax --minimax-voice VOICE_ID] [--minimax-model MODEL] [--minimax-speed NUMBER] [--minimax-min-interval-ms NUMBER] [--minimax-api-key-env NAME] [--minimax-keychain-service NAME] [--minimax-env-file PATH] [--minimax-endpoint URL]";
 const [inputPath, ...options] = process.argv.slice(2);
 let dryRun = false;
+let confirmed = false;
 let configuredApiUrl = process.env.ANKI_CONNECT_URL || DEFAULT_API_URL;
 const tts = {
   enabled: true,
@@ -66,6 +75,8 @@ for (let index = 0; index < options.length; index += 1) {
   const option = options[index];
   if (option === "--dry-run") {
     dryRun = true;
+  } else if (option === "--confirmed") {
+    confirmed = true;
   } else if (option === "--without-tts") {
     tts.enabled = false;
   } else if (option === "--anki-connect-url") {
@@ -169,6 +180,9 @@ const contextCounts = input.notes.map((note, noteIndex) => {
   for (const field of BASE_REQUIRED_FIELDS) {
     assert(typeof note[field] === "string" && note[field].trim(), `notes[${noteIndex}].${field} must be a non-empty string.`);
   }
+  assert(note.Theme === undefined || note.Theme === null || typeof note.Theme === "string", `notes[${noteIndex}].Theme must be a string when provided.`);
+  const theme = normalizeTheme(note.Theme);
+  assert(ALLOWED_THEMES.has(theme), `notes[${noteIndex}].Theme must be one of: ${[...ALLOWED_THEMES].join("、")}。`);
   const contextCount = getContextCount(note, noteIndex);
   const word = normalizeWord(note.Word);
   assert(!noteWords.has(word), `Duplicate Word in input: ${note.Word}`);
@@ -189,7 +203,7 @@ const modelFields = await invoke("modelFieldNames", { modelName });
 const missingFields = ALL_NOTE_FIELDS.filter((field) => !modelFields.includes(field));
 assert(!missingFields.length, `Model is missing fields: ${missingFields.join("、")}`);
 if (tts.enabled) {
-  const missingAudioFields = [...AUDIO_FIELDS, AUDIO_MEDIA_REFERENCE_FIELD].filter((field) => !modelFields.includes(field));
+  const missingAudioFields = [...AUDIO_FIELDS, AUDIO_AUTOPLAY_FIELD, AUDIO_MEDIA_REFERENCE_FIELD].filter((field) => !modelFields.includes(field));
   assert(!missingAudioFields.length, `Model is missing TTS fields: ${missingAudioFields.join("、")}。请先运行 scripts/ensure-audio-fields.mjs 检查并在获得授权后用 --apply 修复。`);
 }
 
@@ -202,7 +216,10 @@ assert(!duplicates.length, `Words already exist in ${modelName}: ${duplicates.jo
 const ankiNotes = input.notes.map((fields) => ({
   deckName: input.deckName,
   modelName,
-  fields: Object.fromEntries(ALL_NOTE_FIELDS.map((field) => [field, typeof fields[field] === "string" ? fields[field].trim() : ""])),
+  fields: Object.fromEntries(ALL_NOTE_FIELDS.map((field) => [
+    field,
+    field === THEME_FIELD ? normalizeTheme(fields[field]) : (typeof fields[field] === "string" ? fields[field].trim() : "")
+  ])),
   tags: ["多场景完型"]
 }));
 const canAdd = await invoke("canAddNotes", { notes: ankiNotes });
@@ -214,17 +231,34 @@ if (dryRun) {
     ankiConnectUrl: apiUrl,
     modelName,
     deckName: input.deckName,
-    words: input.notes.map((note, index) => ({ word: note.Word, contexts: contextCounts[index] })),
+    preview: input.notes.map((note, index) => ({
+      word: note.Word,
+      chinese: note.Chinese,
+      partOfSpeech: note.PartOfSpeech,
+      contexts: contextCounts[index],
+      theme: ankiNotes[index].fields.Theme,
+      examples: Array.from({ length: contextCounts[index] }, (_, contextIndex) => {
+        const slot = contextIndex + 1;
+        return {
+          scene: note[`Scene${slot}`],
+          sentence: note[`Sentence${slot}`],
+          translation: note[`Translation${slot}`],
+          analysis: note[`Analysis${slot}`]
+        };
+      })
+    })),
     tts: tts.enabled ? { provider: tts.provider, model: tts.model, voiceId: tts.voiceId, speed: tts.speed } : null
   }, null, 2));
   process.exit(0);
 }
 
+assert(confirmed, "Refusing unconfirmed import. Run --dry-run, obtain the user's explicit approval of the word and every example, then rerun with --confirmed.");
+
 if (tts.enabled && tts.provider === "minimax") {
   const apiKey = await getMiniMaxApiKey(tts);
   let generatedCharacters = 0;
   for (const [noteIndex, note] of input.notes.entries()) {
-    for (const field of [...AUDIO_FIELDS, AUDIO_MEDIA_REFERENCE_FIELD]) ankiNotes[noteIndex].fields[field] = "";
+    for (const field of [...AUDIO_FIELDS, AUDIO_AUTOPLAY_FIELD, AUDIO_MEDIA_REFERENCE_FIELD]) ankiNotes[noteIndex].fields[field] = "";
     const audioTargets = [
       { field: "AudioWord", slot: "word", text: stripClozeMarkup(note.Word) },
       ...Array.from({ length: contextCounts[noteIndex] }, (_, index) => ({
@@ -261,6 +295,7 @@ if (tts.enabled && tts.provider === "minimax") {
     ankiNotes[noteIndex].fields[AUDIO_MEDIA_REFERENCE_FIELD] = audioTargets
       .map((target) => `[sound:${ankiNotes[noteIndex].fields[target.field]}]`)
       .join(" ");
+    ankiNotes[noteIndex].fields[AUDIO_AUTOPLAY_FIELD] = `[sound:${ankiNotes[noteIndex].fields.AudioWord}]`;
   }
   console.log(`MiniMax TTS 已生成或复用 ${contextCounts.reduce((sum, count) => sum + count + 1, 0)} 段音频；本次新生成 ${generatedCharacters} 个字符。`);
 }
@@ -269,7 +304,7 @@ const noteIds = await invoke("addNotes", { notes: ankiNotes });
 assert(noteIds.every(Boolean), "AnkiConnect returned an incomplete addNotes result; no automatic rollback was attempted.");
 const readback = await invoke("notesInfo", { notes: noteIds });
 for (const [index, note] of readback.entries()) {
-  for (const field of [...ALL_NOTE_FIELDS, ...(tts.enabled ? [...AUDIO_FIELDS, AUDIO_MEDIA_REFERENCE_FIELD] : [])]) {
+  for (const field of [...ALL_NOTE_FIELDS, ...(tts.enabled ? [...AUDIO_FIELDS, AUDIO_AUTOPLAY_FIELD, AUDIO_MEDIA_REFERENCE_FIELD] : [])]) {
     assert(note.fields[field]?.value === ankiNotes[index].fields[field], `Readback mismatch for ${ankiNotes[index].fields.Word}.${field}`);
   }
   assert(note.cards.length === 1, `Expected one cloze card for ${ankiNotes[index].fields.Word}, received ${note.cards.length}.`);

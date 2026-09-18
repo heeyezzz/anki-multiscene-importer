@@ -21,15 +21,17 @@ Scene2, Sentence2, Translation2, Analysis2,
 Scene3, Sentence3, Translation3, Analysis3
 ```
 
+`Theme` is optional. Omit it or set it to `bauhaus` for the default Bauhaus visual style; set it to `minimal` for the standard visual style. No other values are accepted. The importer writes `bauhaus` when the field is omitted or empty.
+
 `Scene4`, `Sentence4`, `Translation4`, `Analysis4` and the corresponding group 5 are optional. Include either all four fields in a group or none of them. Context groups must be consecutive: a note may contain groups 1–3, 1–4, or 1–5, but never group 5 without group 4.
 
 When the model has audio enabled, it also contains these optional fields. Do not put values in them in the input JSON; the importer fills them only when MiniMax TTS is explicitly enabled:
 
 ```text
-AudioWord, AudioSentence1, AudioSentence2, AudioSentence3, AudioSentence4, AudioSentence5, AudioMediaRefs
+AudioWord, AudioSentence1, AudioSentence2, AudioSentence3, AudioSentence4, AudioSentence5, AudioWordAuto, AudioMediaRefs
 ```
 
-`AudioWord` stores the raw MP3 filename for the custom replay button. Do not supply audio fields in input JSON.
+`AudioWord` stores the raw MP3 filename for the custom replay button. `AudioWordAuto` stores the complete `[sound:filename.mp3]` reference used only by the answer template for Anki's native automatic playback. Do not supply either field in input JSON.
 
 ## Content conventions
 
